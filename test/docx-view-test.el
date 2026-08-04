@@ -1018,6 +1018,37 @@ is invisible: it is every query for our links that comes back empty."
   (with-temp-buffer
     (should-error (docx-view-open-externally) :type 'user-error)))
 
+(ert-deftest docx-view-test-autoload-cookies ()
+  "Everything a fresh install reaches before loading the file is autoloaded.
+
+This is the one class of bug the rest of the suite cannot see.  Every other
+test has already loaded docx-view, so every symbol resolves whether it is
+autoloaded or not.  A real installation has loaded nothing: package.el has
+only the generated autoloads file, and if the `auto-mode-alist' entry names a
+mode that is not in it, Emacs reports \"Ignoring unknown mode\" and leaves the
+raw zip archive in `fundamental-mode'.  That was measured, not imagined.
+
+So the cookies are asserted against the source text.  Reading the file is the
+only way to check them, because by the time this runs the definitions are
+loaded and indistinguishable from autoloaded ones."
+  (let ((source (expand-file-name "../docx-view.el" docx-view-test-directory)))
+    (should (file-readable-p source))
+    (with-temp-buffer
+      (insert-file-contents source)
+      (dolist (form '("(define-derived-mode docx-view-mode org-mode"
+                      "(defun docx-view-find-file "
+                      "(defalias 'docx-view "
+                      "(defconst docx-view-file-name-regexp"
+                      "(add-to-list 'auto-mode-alist"
+                      "(add-to-list 'auto-coding-alist"
+                      "(defun docx-view-dired-view "))
+        (goto-char (point-min))
+        (should (search-forward form nil t))
+        ;; The cookie must be on the line before the form, which is what
+        ;; `loaddefs-generate' looks for.
+        (forward-line -1)
+        (should (looking-at-p "^;;;###autoload$"))))))
+
 (provide 'docx-view-test)
 
 ;;; docx-view-test.el ends here

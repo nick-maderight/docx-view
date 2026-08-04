@@ -611,6 +611,13 @@ The normal revert would reinstate the .docx bytes; this re-renders instead."
     ["Re-read from disk" docx-view-revert]
     ["Open in external application" docx-view-open-externally]))
 
+;; The `auto-mode-alist' entry below names this mode, so the mode itself has to
+;; be autoloaded too.  Without this cookie a freshly installed package loads
+;; nothing when a .docx is opened: Emacs finds the alist entry, cannot resolve
+;; the symbol, reports "Ignoring unknown mode", and leaves the raw archive in
+;; `fundamental-mode'.  Loading the file by hand hides the bug, which is why it
+;; is worth stating here.
+;;;###autoload
 (define-derived-mode docx-view-mode org-mode "Docx"
   "Major mode for reading a .docx file with its changes and comments.
 
