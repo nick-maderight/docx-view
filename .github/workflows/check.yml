@@ -1,0 +1,74 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Emacs ${{ matrix.emacs-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.emacs-version == 'snapshot' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        emacs-version: ['27.1', '27.2', '28.2', '29.4', '30.2', 'snapshot']
+        include:
+          # One macOS job, on the lowest supported version and the newest
+          # release, because the two external programs this package calls are
+          # the parts most likely to differ between platforms.
+          - os: macos-latest
+            emacs-version: '27.1'
+          - os: macos-latest
+            emacs-version: '30.2'
+    steps:
+      - uses: actions/checkout@v7
+
+      # purcell/setup-emacs builds from nix-emacs-ci, which is why the version
+      # list above can reach back to 27.1.  It supports Linux and macOS only.
+      - uses: purcell/setup-emacs@v8.0
+        with:
+          version: ${{ matrix.emacs-version }}
+
+      # pandoc is not preinstalled on the runner images.  The apt package is
+      # several major versions behind, and this package needs a docx reader
+      # that understands --track-changes=all, so pandoc comes from its own
+      # release rather than from the distribution.
+      - uses: r-lib/actions/setup-pandoc@v2
+        with:
+          pandoc-version: '3.8.3'
+
+      # unzip is preinstalled on both runner images; this only proves that the
+      # two programs the package shells out to are really on PATH, so that a
+      # missing one is reported here and not as a wall of skipped tests.
+      - name: Show tool versions
+        run: |
+          emacs --version | head -1
+          pandoc --version | head -1
+          unzip -v | head -1
+
+      - name: Compile
+        run: make compile
+
+      - name: Test
+        run: make test
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # package-lint checks the declared Emacs dependency against its own table
+      # of when each symbol appeared, so it wants a recent Emacs to have a
+      # complete table.  It is a separate job for that reason: running it once
+      # on the newest release says more than running it on every version.
+      - uses: purcell/setup-emacs@v8.0
+        with:
+          version: '30.2'
+
+      - name: Lint
+        run: make lint

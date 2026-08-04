@@ -1,0 +1,136 @@
+#+TITLE: docx-view
+#+OPTIONS: toc:nil
+
+Read a =.docx= file in Emacs with its tracked changes and its comments intact, rendered as org-mode.
+
+Word documents arrive from collaborators full of revision marks and margin comments, and that is exactly the part every text-mode reader throws away. Pandoc's own org writer discards revision and comment spans, so =pandoc -t org= gives you clean prose and silently loses the review. docx-view keeps them.
+
+This is a viewer. It never writes to a =.docx=, and it does not convert one. Saving is refused rather than ignored, so the document you are reading cannot be damaged by a stray =C-x C-s=.
+
+* What it looks like
+
+A document with an insertion, a deletion and a comment renders like this:
+
+#+begin_example
+** Combined and Unicode
+[[dvchg:c1][(1)]]The report [[dvchg:ins-1][clearly]] [[dvchg:del-2][somewhat]] shows a trend.
+
+中文段落：[[dvchg:ins-3][这是插入的内容。]][[dvchg:del-4][这是删除的内容。]]
+
+** Comments (1)
+- [1] Alice Smith, 2026-08-01 03:00
+  Comment with special chars: & < > " 100% *bold?* [link]
+#+end_example
+
+In the buffer the links show only their description, coloured by kind and by author: insertions underlined, deletions struck through, comment markers in their own face. The link target carries the change identity, which is what makes navigation, the change list and =imenu= work.
+
+Links are used rather than org emphasis characters because emphasis is the one form that cannot express this. Org requires =/slashes/= to sit at a word boundary, and a tracked change routinely begins mid-word or against a CJK character, where the markup would simply not render. A link works in both places.
+
+* Install
+
+docx-view needs Emacs 27.1 or newer, [[https://pandoc.org][pandoc]], and =unzip=. It has no Emacs Lisp dependencies at all.
+
+From source:
+
+#+begin_src elisp
+(add-to-list 'load-path "/path/to/docx-view")
+(require 'docx-view)
+#+end_src
+
+With =use-package= and a straight or elpaca recipe:
+
+#+begin_src elisp
+(use-package docx-view
+  :straight (docx-view :type git :host github :repo "nick-maderight/docx-view"))
+#+end_src
+
+Nothing else is required. Opening any =.docx=, =.docm=, =.dotx= or =.dotm= then puts you in =docx-view-mode=, because the package autoloads its own =auto-mode-alist= entry.
+
+Pandoc must be on =exec-path=. If it lives somewhere Emacs cannot see, set =docx-view-pandoc-program= to its absolute path.
+
+* Use
+
+Open a file the way you open any other, with =C-x C-f=, or call =M-x docx-view= for a prompt that offers only Word documents. In Dired, =M-x docx-view-dired-view= opens the file at point.
+
+| Key       | Command                     | Effect                                            |
+|-----------+-----------------------------+---------------------------------------------------|
+| =C-c C-c= | =docx-view-cycle-mode=      | cycle all changes, accepted, rejected             |
+| =C-c C-v= | =docx-view-set-mode=        | choose one of those three directly                |
+| =C-c C-n= | =docx-view-next-change=     | move to the next change                           |
+| =C-c C-p= | =docx-view-previous-change= | move to the previous change                        |
+| =C-c C-o= | =docx-view-show-at-point=   | describe the change or comment under point         |
+| =C-c C-l= | =docx-view-list-changes=    | every change in one buffer, =RET= jumps to it     |
+| =C-c C-a= | =docx-view-filter-author=   | mark only one author's changes; empty input clears |
+| =C-c C-e= | =docx-view-open-externally= | hand the file to the system's own application      |
+| =g=       | =docx-view-revert=          | re-read from disk                                  |
+| =q=       | =quit-window=               | leave                                              |
+
+The buffer is a real org-mode buffer with =org-mode-map= as its parent keymap, so folding, =imenu=, speed keys and org navigation all work as usual.
+
+The three view modes come from a single pandoc run. Pandoc is asked for =--track-changes=all= once, and the accepted and rejected views are computed from that same tree, so switching modes is instant and the three views cannot disagree with each other.
+
+* Options
+
+All of these live in the =docx-view= customize group.
+
+| Option                             | Default    | Meaning                                                     |
+|------------------------------------+------------+-------------------------------------------------------------|
+| =docx-view-default-mode=           | =all=      | which revisions a document shows when first opened          |
+| =docx-view-render-comments=        | =section=  | =section=, =inline= or =none=                                |
+| =docx-view-render-change-marker=   | =link=     | =link=, or =plain= for face-only marking with no markup     |
+| =docx-view-render-author-colors=   | 7 colours  | the palette assigned to authors in order of appearance      |
+| =docx-view-render-metadata-drawer= | =t=        | give each heading a property drawer of change counts        |
+| =docx-view-startup-folded=         | =nil=      | open with headings folded                                    |
+| =docx-view-show-warnings=          | =t=        | report in the echo area what could not be represented       |
+| =docx-view-pandoc-program=         | ="pandoc"= | name of, or absolute path to, pandoc                        |
+| =docx-view-pandoc-extra-args=      | =nil=      | extra pandoc arguments, for example =--extract-media=DIR=   |
+| =docx-view-unzip-program=          | ="unzip"=  | must accept =-p=, meaning write member to stdout            |
+
+With =docx-view-render-comments= set to =section=, a comment appears as a numbered marker in the prose and its text goes to a section at the end, where a threaded discussion keeps its structure. =inline= puts the text in the prose immediately after the range it annotates, which reads well for one short comment and badly for a thread. =none= keeps the markers and leaves the text to =C-c C-o= and the change list.
+
+Six faces carry the styling and can be themed like any others: =docx-view-insertion=, =docx-view-deletion=, =docx-view-paragraph-change=, =docx-view-comment-marker=, =docx-view-comment-range=, =docx-view-comment-resolved=.
+
+* How it works
+
+Three layers, one file each, so that a change to any one of them is contained:
+
+- =docx-view-pandoc.el= owns the pandoc subprocess and the shape of its JSON output. Pandoc is asked for JSON rather than org because the JSON AST is the only form that still carries the revision and comment spans. Filtering for the accepted and rejected views happens here, over the parsed tree.
+
+- =docx-view-ooxml.el= reads the parts of the archive that pandoc does not report. Comment authors, timestamps, reply threading and resolved state live in =word/comments.xml=, =word/commentsExtended.xml= and =word/people.xml=; pandoc surfaces the comment text but not the metadata around it. This layer extracts single members with =unzip -p= and parses them with the built-in XML parser.
+
+- =docx-view-render.el= turns the filtered tree into org text, records where every change landed, and builds the comment section.
+
+- =docx-view.el= is the mode: the keymap, the menu, the overlays, navigation, the change list, =imenu=, and the guards that keep the buffer from ever being written back.
+
+** What pandoc cannot see
+
+Pandoc's docx reader represents insertions, deletions and paragraph-level insertions and deletions, and it reports comment text. It does not represent moves as moves, formatting-only revisions, or table row and cell revisions. Those are read straight from the OOXML instead and listed in an "Other revisions" section, so the document tells you they exist rather than quietly dropping them.
+
+When something cannot be placed in the text at all, for instance a comment anchored nowhere, it is reported in the echo area and still shown in the comment section. A viewer that hides what it could not represent is worse than one that says so.
+
+** Why saving is refused, and how
+
+=buffer-read-only= is not enough. A read-only buffer can still be saved: =read-only-mode= guards editing commands, not =save-buffer=, and a buffer that gets modified by any other route will happily overwrite the file with rendered org text. That was measured, and the file was destroyed.
+
+The guard is =write-contents-functions= signalling a =user-error=, which is the one hook that runs early enough to stop the write. =write-file= is covered too, including =write-file= onto a different document's name, since =set-visited-file-name= runs before the write hooks and would otherwise have discarded the mode's own state by then. Backups and auto-save are disabled for the same reason. The test suite asserts all of this by checksumming the file before and after.
+
+* Development
+
+#+begin_src sh
+make test      # run the ERT suite
+make compile   # byte-compile with every warning an error
+make lint      # package-lint and checkdoc
+make check     # all three, which is what CI runs
+#+end_src
+
+Plain make, on purpose: eldev and cask are both good, but each is one more thing to install before a contributor can run the tests, and this package's whole claim is that it needs nothing but Emacs and pandoc.
+
+The 59 tests cover each layer and the mode. The fixtures under =test/fixtures= are hand-built OOXML rather than documents saved by Word, so each one exercises a named feature of the format and the suite has no dependency on a Word installation. =test/fixtures/generate-fixtures.py= rebuilds them.
+
+Tests that need pandoc skip rather than fail when it is absent, so the suite still says something useful on a machine without it.
+
+CI runs the suite on Emacs 27.1, 27.2, 28.2, 29.4, 30.2 and snapshot on Linux, and on 27.1 and 30.2 on macOS.
+
+* License
+
+GPL-3.0-or-later. See [[file:LICENSE][LICENSE]].
