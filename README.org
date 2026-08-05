@@ -30,18 +30,29 @@ Org emphasis characters cannot express this, so links do the work instead. Org r
 
 docx-view requires Emacs 27.1 or newer, [[https://pandoc.org][pandoc]], and =unzip=. It has no Emacs Lisp dependencies at all.
 
-From source:
+** use-package with :vc (Emacs 30 or newer)
+
+#+begin_src elisp
+(use-package docx-view
+  :vc (:url "https://github.com/nick-maderight/docx-view" :rev :newest))
+#+end_src
+
+Keep the =:rev :newest=. The default, =:last-release=, means the newest revision that changed the =Version:= header. This repository has no release tag yet, so that default installs the first commit rather than current code.
+
+** use-package with elpaca
+
+#+begin_src elisp
+(use-package docx-view
+  :ensure (:host github :repo "nick-maderight/docx-view"))
+#+end_src
+
+A recipe in =:ensure= requires =elpaca-use-package-mode= already on, which elpaca's own bootstrap block enables.
+
+** From source, on any supported Emacs
 
 #+begin_src elisp
 (add-to-list 'load-path "/path/to/docx-view")
 (require 'docx-view)
-#+end_src
-
-With =use-package= and a straight or elpaca recipe:
-
-#+begin_src elisp
-(use-package docx-view
-  :straight (docx-view :type git :host github :repo "nick-maderight/docx-view"))
 #+end_src
 
 That is the whole setup. Opening any =.docx=, =.docm=, =.dotx= or =.dotm= then puts you in =docx-view-mode=, because the package autoloads its own =auto-mode-alist= entry.
