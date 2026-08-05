@@ -114,6 +114,12 @@ When something cannot be placed in the text at all, for instance a comment ancho
 
 The guard is =write-contents-functions= signalling a =user-error=, which is the one hook that runs early enough to stop the write. =write-file= is covered too, including =write-file= onto a different document's name, since =set-visited-file-name= runs before the write hooks and would otherwise have discarded the mode's own state by then. Backups and auto-save are disabled for the same reason. The test suite asserts all of this by checksumming the file before and after.
 
+A buffer-local hook entry is not enough on its own, and this is the part that is easy to get wrong. =write-contents-functions= is not =permanent-local=, so =kill-all-local-variables= removes it, and every major mode change calls that. Measured: open a document, type =M-x text-mode=, then =C-x C-s=, and the =.docx= had been overwritten with org text. The mode change had silently taken the guard with it.
+
+So the refusal carries the =permanent-local-hook= property, which keeps that one hook member across a mode change while other members are still cleared as they should be. =buffer-read-only=, =backup-inhibited= and the auto-save name are ordinary locals that a mode change does clear, so they are re-established from =after-change-major-mode-hook=.
+
+=write-file= onto a name that is not a document is deliberately allowed, and it stops the protection: keeping the rendered text as a file of its own is reasonable, and refusing it would make the view a trap, readable but impossible to save anywhere. Only =.docx=, =.docm=, =.dotx= and =.dotm= targets are refused, because only those would put org text where a zip archive belongs.
+
 * Development
 
 #+begin_src sh
@@ -125,7 +131,7 @@ make check     # all three, which is what CI runs
 
 Plain make, on purpose: eldev and cask are both good, but each is one more thing to install before a contributor can run the tests, and this package's whole claim is that it needs nothing but Emacs and pandoc.
 
-The 59 tests cover each layer and the mode. The fixtures under =test/fixtures= are hand-built OOXML rather than documents saved by Word, so each one exercises a named feature of the format and the suite has no dependency on a Word installation. =test/fixtures/generate-fixtures.py= rebuilds them.
+The 65 tests cover each layer and the mode. The fixtures under =test/fixtures= are hand-built OOXML rather than documents saved by Word, so each one exercises a named feature of the format and the suite has no dependency on a Word installation. =test/fixtures/generate-fixtures.py= rebuilds them.
 
 Tests that need pandoc skip rather than fail when it is absent, so the suite still says something useful on a machine without it.
 

@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Nick
 
 ;; Author: Nick <nick@maderightsoftware.com>
+;; Assisted-by: Claude Code:claude-opus-5
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; This file is part of docx-view.
@@ -742,7 +743,7 @@ hook, so it passes whether the guard is present or not."
         (set-buffer-modified-p nil)))))
 
 (ert-deftest docx-view-test-mode-refuses-write-file ()
-  "Writing the buffer under a name, with \\[write-file], is refused too."
+  "Writing the buffer under the document's own name is refused too."
   (docx-view-test-with-pandoc
     (docx-view-test-with-buffer "comments" file
       (let ((before (docx-view-test-checksum file)))
@@ -750,13 +751,131 @@ hook, so it passes whether the guard is present or not."
         (should (equal before (docx-view-test-checksum file)))))))
 
 (ert-deftest docx-view-test-mode-refuses-to-clobber-another-docx ()
-  "Writing under a second document's name leaves that document alone."
+  "Writing under a second document's name leaves that document alone.
+
+The protection also has to survive the attempt.  `write-file' calls
+`set-visited-file-name' before any write hook runs, and that clears
+`backup-inhibited' and recomputes the auto-save name -- measured, and it left
+a #doc.docx# of org text on disk.  So the state after the refusal is asserted,
+not just the refusal itself."
   (docx-view-test-with-pandoc
     (docx-view-test-with-copy "revisions" victim
       (docx-view-test-with-buffer "comments" _file
         (let ((before (docx-view-test-checksum victim)))
           (should-error (write-file victim) :type 'user-error)
+          (should (equal before (docx-view-test-checksum victim)))
+          ;; Still a protected view of a document, despite the new name.
+          (should (memq 'docx-view--refuse-write write-contents-functions))
+          (should-not buffer-auto-save-file-name)
+          (should backup-inhibited)
+          (should docx-view--file)
+          ;; And a second attempt is refused as well.
+          (should-error (save-buffer) :type 'user-error)
           (should (equal before (docx-view-test-checksum victim))))))))
+
+(ert-deftest docx-view-test-mode-allows-write-file-to-a-non-document ()
+  "Saving the rendered text under a name that is not a document is allowed.
+
+Refusing this would make the view a trap: the text could be read but never
+kept.  Only .docx targets are refused, because only those would put org text
+where a zip archive belongs.  Once the buffer visits an ordinary file it is an
+ordinary buffer, and saving it again has to work."
+  (docx-view-test-with-pandoc
+    (docx-view-test-with-buffer "comments" file
+      (let ((before (docx-view-test-checksum file))
+            (out (make-temp-file "docx-view-test-out" nil ".org")))
+        (unwind-protect
+            (progn
+              (write-file out)
+              (should (file-exists-p out))
+              (should (string-prefix-p
+                       "#+title:"
+                       (with-temp-buffer (insert-file-contents out)
+                                         (buffer-string))))
+              ;; The document it came from is untouched.
+              (should (equal before (docx-view-test-checksum file)))
+              ;; And protection has been dropped, since there is nothing left
+              ;; to protect.
+              (should-not (memq 'docx-view--refuse-write write-contents-functions))
+              (should-not docx-view--file)
+              (let ((inhibit-read-only t))
+                (goto-char (point-max))
+                (insert "an ordinary edit\n"))
+              (save-buffer)
+              (should-not (buffer-modified-p)))
+          (when (file-exists-p out) (delete-file out)))))))
+
+(ert-deftest docx-view-test-mode-survives-a-major-mode-change ()
+  "A major mode change cannot strip the write guard.
+
+This is the most serious bug the suite has caught, and it destroyed a
+document.  `write-contents-functions' is not `permanent-local', so the
+`kill-all-local-variables' that every major mode change performs removed the
+guard.  Measured, before the fix: open a document, \\`M-x text-mode',
+\\[save-buffer], and the .docx had been overwritten with org text -- its
+checksum changed and its first bytes read \"#+title:\".
+
+`buffer-read-only', `backup-inhibited' and the auto-save name are plain
+locals, so the mode change clears those too; they are restored from
+`after-change-major-mode-hook'.  All of it is asserted here, because each one
+alone is enough to put org text on disk beside the document."
+  (docx-view-test-with-pandoc
+    (docx-view-test-with-buffer "comments" file
+      (let ((before (docx-view-test-checksum file)))
+        (text-mode)
+        (should (eq major-mode 'text-mode))
+        (should (memq 'docx-view--refuse-write write-contents-functions))
+        (should buffer-read-only)
+        (should backup-inhibited)
+        (should-not buffer-auto-save-file-name)
+        (should docx-view--file)
+        (let ((inhibit-read-only t))
+          (goto-char (point-max))
+          (insert "text that must never reach the document\n"))
+        (should-error (save-buffer) :type 'user-error)
+        (should (equal before (docx-view-test-checksum file)))
+        (set-buffer-modified-p nil)))))
+
+(ert-deftest docx-view-test-mode-survives-repeated-mode-changes ()
+  "Several mode changes in a row neither strip the guard nor duplicate it."
+  (docx-view-test-with-pandoc
+    (docx-view-test-with-buffer "clean" file
+      (let ((before (docx-view-test-checksum file)))
+        (fundamental-mode)
+        (prog-mode)
+        (text-mode)
+        (should (= 1 (cl-count 'docx-view--refuse-write write-contents-functions)))
+        (should (= 1 (cl-count 'docx-view--reprotect-buffer
+                               after-change-major-mode-hook)))
+        (let ((inhibit-read-only t)) (goto-char (point-max)) (insert "x\n"))
+        (should-error (save-buffer) :type 'user-error)
+        (should (equal before (docx-view-test-checksum file)))
+        (set-buffer-modified-p nil)))))
+
+(ert-deftest docx-view-test-protection-does-not-leak-to-other-buffers ()
+  "An unrelated file is not made unsavable by docx-view having been used.
+
+The guard is permanent, which is what makes it survive a mode change, so it
+is worth proving it is also confined: a buffer that never showed a document
+must save normally."
+  (let ((file (make-temp-file "docx-view-test-plain" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "ordinary text\n"))
+          (let ((buffer (find-file-noselect file)))
+            (unwind-protect
+                (with-current-buffer buffer
+                  (should-not (memq 'docx-view--refuse-write
+                                    write-contents-functions))
+                  (should-not docx-view--file)
+                  (goto-char (point-max))
+                  (insert "an edit\n")
+                  (save-buffer)
+                  (should-not (buffer-modified-p)))
+              (with-current-buffer buffer
+                (set-buffer-modified-p nil)
+                (kill-buffer)))))
+      (delete-file file))))
 
 (ert-deftest docx-view-test-mode-no-auto-save-or-backup ()
   "No auto-save file and no backup are made of a generated buffer."
@@ -765,6 +884,21 @@ hook, so it passes whether the guard is present or not."
       (should-not buffer-auto-save-file-name)
       (should backup-inhibited)
       (should-not buffer-offer-save))))
+
+(ert-deftest docx-view-test-document-name-p ()
+  "The name test used by the write guard answers for a nonexistent file.
+
+`docx-view-file-p' reads the file's leading bytes, so it cannot answer for a
+\\[write-file] target that does not exist yet.  That is the whole reason this
+second predicate exists, so the distinction is asserted rather than assumed."
+  (should (docx-view-document-name-p "/nowhere/at/all/report.docx"))
+  (should (docx-view-document-name-p "/nowhere/report.docm"))
+  (should (docx-view-document-name-p "/nowhere/template.dotx"))
+  (should-not (docx-view-document-name-p "/nowhere/notes.org"))
+  (should-not (docx-view-document-name-p "/nowhere/report.docx.bak"))
+  (should-not (docx-view-document-name-p nil))
+  ;; The contents test disagrees on a nonexistent file, which is the point.
+  (should-not (docx-view-file-p "/nowhere/at/all/report.docx")))
 
 (ert-deftest docx-view-test-mode-leaves-other-files-alone ()
   "Entering the mode on something that is not a document erases nothing.

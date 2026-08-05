@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Nick
 
 ;; Author: Nick <nick@maderightsoftware.com>
+;; Assisted-by: Claude Code:claude-opus-5
 ;; Maintainer: Nick <nick@maderightsoftware.com>
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "27.1"))
@@ -91,6 +92,14 @@
 
 (defvar-local docx-view--file nil
   "Absolute path of the .docx this buffer is showing.")
+
+;; Permanent, so that it survives `kill-all-local-variables' -- which every
+;; major mode change performs.  The write guard is re-established after such a
+;; change and needs to know which document it is protecting; without this the
+;; path is gone by then.  It is cleared when the buffer stops visiting the
+;; document, either by `find-alternate-file', which clears permanent locals
+;; too, or by `docx-view--visited-file-name-changed' below.
+(put 'docx-view--file 'permanent-local t)
 
 (defvar-local docx-view--document nil
   "The `docx-view-document' currently rendered.")
@@ -194,6 +203,30 @@ separate link type per case."
 (defconst docx-view--zip-magic '("PK\3\4" "PK\5\6" "PK\7\10")
   "Leading bytes of a zip archive: an entry, an empty archive, a spanned one.
 A .docx is a zip, so these are the first four bytes of every real one.")
+
+;; Defined here rather than beside the `auto-mode-alist' entry that uses it,
+;; because the write guard needs it too and that comes first in this file.
+;;
+;; The cookie is mandatory.  The `add-to-list' calls further down are autoloaded
+;; and refer to this value by name, so without it the generated autoloads file
+;; holds a form referring to an unbound variable and a fresh install fails
+;; before it can open anything.  A regression test asserts the cookie is here.
+;;;###autoload
+(defconst docx-view-file-name-regexp "\\.do[ct][xm]\\'"
+  "Match the file names docx-view offers to render.
+Covers .docx and .docm documents and .dotx and .dotm templates, all of which
+pandoc's docx reader accepts.")
+
+(defun docx-view-document-name-p (file)
+  "Return non-nil when FILE is named like a Word document.
+
+Only the name is looked at, so this answers for a file that does not exist
+yet.  That is what the write guard needs: \\[write-file] names its target
+before anything is written, and a .docx target must be refused whether or not
+a file is already there.  Use `docx-view-file-p' when the contents matter."
+  (and (stringp file)
+       (string-match-p docx-view-file-name-regexp file)
+       t))
 
 (defun docx-view-file-p (file)
   "Return non-nil when FILE looks like a Word document.
@@ -314,32 +347,106 @@ sits at the range's start."
 
 ;;;; Write protection
 ;;
-;; This matters more than it looks.  Setting `buffer-read-only' alone does NOT
-;; protect the file: it stops interactive editing but not `save-buffer', and a
-;; save would write the rendered org text over the binary .docx and destroy
-;; it.  Measured, and confirmed by the file's checksum changing.
+;; This matters more than it looks, and it took three attempts to get right.
+;; The buffer holds org text but visits a .docx, so any write puts org text
+;; where a zip archive should be and destroys the document.
 ;;
-;; Clearing `buffer-file-name' would also prevent it, but that breaks revert,
-;; dired integration and the mode line, and turns C-x C-s into a prompt for a
-;; filename.  A `write-contents-functions' entry that signals is the guard
-;; that protects the file without breaking anything else.
+;; Setting `buffer-read-only' alone does NOT protect the file: it stops
+;; interactive editing but not `save-buffer'.  Measured, and confirmed by the
+;; file's checksum changing.
+;;
+;; Clearing `buffer-file-name' would prevent every write, but it breaks revert,
+;; Dired integration and the mode line, and turns C-x C-s into a prompt for a
+;; filename.  A `write-contents-functions' entry that signals protects the file
+;; without breaking any of that.
+;;
+;; But a plain buffer-local hook entry is not enough either, and this is the
+;; part that is easy to miss.  `write-contents-functions' is not
+;; `permanent-local', so `kill-all-local-variables' removes it -- and every
+;; major mode change calls that.  Measured: open a document, type
+;; \\`M-x text-mode', then \\[save-buffer], and the .docx was overwritten with
+;; org text.  The mode change silently took the guard with it.
+;;
+;; Two properties fix that, both of them long-standing (Emacs 27.1 has both):
+;;
+;;   - `permanent-local-hook' on `docx-view--refuse-write' keeps that one
+;;     member of `write-contents-functions' across a mode change, while other
+;;     members are still cleared as they should be.
+;;   - `permanent-local-hook' on `docx-view--reprotect-buffer', added to
+;;     `after-change-major-mode-hook', re-establishes the rest of the
+;;     protection -- read-only, no auto-save, no backup -- because those are
+;;     plain locals that the mode change does clear.
+;;
+;; Belt and braces on purpose.  Either mechanism alone would cover the measured
+;; case, but the cost of being wrong here is a destroyed document, so the guard
+;; that refuses the write does not depend on the hook that restores the rest.
 
 (defun docx-view--refuse-write ()
   "Refuse to write this buffer, and say why.
 Returning non-nil would tell Emacs the buffer had been saved; signalling
 first means it never gets that far.
 
-Note what this does and does not cover.  `save-buffer' is stopped before any
-byte is written, so the .docx is safe.  `write-file' is stopped too, but only
-after it has already called `set-visited-file-name': the buffer ends up
-visiting the new name with this mode's local variables killed, which is
-harmless -- the .docx is untouched and the new file is never written -- but
-it does mean the buffer stops being a docx view.  That is why the commands
-check `docx-view--ensure-document' rather than assuming."
+This runs from `write-contents-functions', and carries the
+`permanent-local-hook' property so that a major mode change cannot remove it.
+It therefore keeps refusing even after the buffer has left `docx-view-mode',
+for as long as the buffer still visits the document.
+
+`save-buffer' is stopped before any byte is written.  So is `write-file' onto
+the document's own name, or onto another .docx.  `write-file' onto an
+unrelated name is a deliberate exception: see
+`docx-view--visited-file-name-changed'."
   (user-error "This is a read-only view of %s; docx-view never writes .docx files"
               (if docx-view--file
                   (file-name-nondirectory docx-view--file)
                 "a document")))
+
+;; Without this property the guard is removed by the `kill-all-local-variables'
+;; that every major mode change performs, and the next save destroys the
+;; document.  Measured, before and after.
+(put 'docx-view--refuse-write 'permanent-local-hook t)
+
+(defun docx-view--visited-file-name-changed ()
+  "React to this buffer being pointed at a different file.
+
+Runs from `after-set-visited-file-name-hook', which `write-file' calls before
+any write hook gets a say.  Two cases, and they need opposite treatment.
+
+The new name is another document: stay protecting it.  `set-visited-file-name'
+has just cleared `backup-inhibited' and turned auto-save back on for the new
+name -- measured, and it left a #doc.docx# of org text on disk -- so the plain
+locals are re-asserted here.  The write itself is still refused.
+
+The new name is not a document: stop protecting entirely.  \\[write-file] to
+some unrelated name is a legitimate way to keep the rendered org text as a
+file of its own, and refusing it would make the view a trap, readable but
+impossible to save anywhere.  What must never happen is org text landing on a
+.docx, and that case is the one above."
+  (when docx-view--file
+    (if (and buffer-file-name (docx-view-document-name-p buffer-file-name))
+        (docx-view--protect-buffer)
+      (remove-hook 'write-contents-functions #'docx-view--refuse-write t)
+      (remove-hook 'after-change-major-mode-hook #'docx-view--reprotect-buffer t)
+      (remove-hook 'after-set-visited-file-name-hook
+                   #'docx-view--visited-file-name-changed t)
+      (kill-local-variable 'docx-view--file))))
+
+(put 'docx-view--visited-file-name-changed 'permanent-local-hook t)
+
+(defun docx-view--reprotect-buffer ()
+  "Restore write protection after a major mode change.
+
+`kill-all-local-variables' clears `buffer-read-only', `backup-inhibited' and
+the auto-save name, so leaving `docx-view-mode' would otherwise leave the
+buffer able to auto-save org text beside the document, or to back it up.  The
+refusal guard itself is permanent and does not need restoring; this covers
+everything around it.
+
+Only a buffer still visiting a document is protected, so this does nothing
+after `docx-view--visited-file-name-changed' has stopped protecting it."
+  (when docx-view--file
+    (docx-view--protect-buffer)))
+
+(put 'docx-view--reprotect-buffer 'permanent-local-hook t)
 
 (defun docx-view--protect-buffer ()
   "Make it impossible for this buffer to overwrite the file it came from.
@@ -348,14 +455,24 @@ Measured, on a copy of a real .docx: with no guard, or with only
 `buffer-read-only' set, `save-buffer' writes the rendered org text over the
 document and the file's checksum changes -- read-only stops interactive
 editing but not saving.  A `write-contents-functions' entry that signals
-leaves the file byte-identical, and also covers `write-file', so
-\\[write-file] cannot be used to sidestep it."
+leaves the file byte-identical, and also covers \\[write-file].
+
+Safe to call more than once: every hook is added with `add-hook', which does
+not duplicate an existing member."
   (add-hook 'write-contents-functions #'docx-view--refuse-write nil t)
+  ;; Re-establish the plain locals below after any major mode change, and stop
+  ;; protecting the document once the buffer no longer visits it.
+  (add-hook 'after-change-major-mode-hook #'docx-view--reprotect-buffer nil t)
+  (add-hook 'after-set-visited-file-name-hook
+            #'docx-view--visited-file-name-changed nil t)
   (setq buffer-read-only t)
   ;; Without this, killing Emacs asks whether to save a buffer that must
   ;; never be saved.
   (setq buffer-offer-save nil)
   ;; An auto-save would drop a #file.docx# of org text beside the document.
+  ;; Measured: `write-file' calls `set-visited-file-name' before any write hook
+  ;; runs, and that turns auto-save back on for the new name, so this is
+  ;; re-asserted from `docx-view--reprotect-buffer' rather than set once.
   (setq-local buffer-auto-save-file-name nil)
   (auto-save-mode -1)
   ;; The rendered text is generated, so a backup of it means nothing.
@@ -721,12 +838,11 @@ cannot be saved over the document it came from.
 ;; The macro-enabled and template variants are included because pandoc reads
 ;; all of them -- verified on .docm, .dotx and .dotm, each of which produced
 ;; the same block count as the .docx it was copied from.
-;;;###autoload
-(defconst docx-view-file-name-regexp "\\.do[ct][xm]\\'"
-  "Match the file names docx-view offers to render.
-Covers .docx and .docm documents and .dotx and .dotm templates, all of which
-pandoc's docx reader accepts.")
-
+;;
+;; `docx-view-file-name-regexp' is defined near the top of this file, because
+;; the write guard needs it before this point.  The cookie below copies its
+;; value into the autoloads file as part of this call, which is what a fresh
+;; install needs: the alist entry has to exist before anything is loaded.
 ;;;###autoload
 (add-to-list 'auto-mode-alist (cons docx-view-file-name-regexp 'docx-view-mode))
 

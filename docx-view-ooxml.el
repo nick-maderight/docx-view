@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Nick
 
 ;; Author: Nick <nick@maderightsoftware.com>
+;; Assisted-by: Claude Code:claude-opus-5
 ;; Maintainer: Nick <nick@maderightsoftware.com>
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Homepage: https://github.com/nick-maderight/docx-view
