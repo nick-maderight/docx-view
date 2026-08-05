@@ -63,11 +63,31 @@
   "Return the absolute path of fixture NAME."
   (expand-file-name (format "fixtures/%s.docx" name) docx-view-test-directory))
 
+(defun docx-view-test-contains (needle haystack)
+  "Return non-nil when NEEDLE occurs in HAYSTACK as a literal substring.
+
+`string-search' would say this in one call, but it arrived in Emacs 28.1 and
+this package supports 27.1.  `string-match-p' is not a substitute on its own:
+the strings compared here are document text, carrying regexp characters of
+their own -- the fixtures deliberately include \"*bold?*\", \"[link]\" and
+\"100%\" -- so the needle is quoted before it is used as a pattern."
+  (and (string-match-p (regexp-quote needle) haystack) t))
+
 (defmacro docx-view-test-with-pandoc (&rest body)
-  "Run BODY, skipping the test when pandoc is unavailable."
+  "Run BODY, skipping the test when pandoc is unavailable.
+
+The skip goes through `ert-skip' rather than `skip-unless'.  `skip-unless' is
+not a function or a global macro: `ert-deftest' binds it with `cl-macrolet'
+around the test body, so it is only visible to code written directly inside a
+test.  A macro that expands into it is fine at run time but unresolvable when
+this file is byte-compiled -- measured on Emacs 27.1 and 27.2: \"the following
+functions are not known to be defined: skip-unless\", which is an error here
+because warnings are errors.  `ert-skip' is a plain function, present since
+Emacs 26, and does the same thing."
   (declare (indent 0))
   `(progn
-     (skip-unless (docx-view-pandoc-available-p))
+     (unless (docx-view-pandoc-available-p)
+       (ert-skip "pandoc is not installed"))
      ,@body))
 
 (defmacro docx-view-test-with-copy (name var &rest body)
@@ -308,13 +328,13 @@ comparing the two writers' layouts."
              (deleted (funcall texts 'deletion)))
         (should (or inserted deleted))
         (dolist (text inserted)
-          (should (string-search text accepted))
+          (should (docx-view-test-contains text accepted))
           (unless (member text deleted)
-            (should-not (string-search text rejected))))
+            (should-not (docx-view-test-contains text rejected))))
         (dolist (text deleted)
-          (should (string-search text rejected))
+          (should (docx-view-test-contains text rejected))
           (unless (member text inserted)
-            (should-not (string-search text accepted))))))))
+            (should-not (docx-view-test-contains text accepted))))))))
 
 (ert-deftest docx-view-test-pandoc-filter-collapses-spaces ()
   "Dropping a change does not leave the spaces that surrounded it doubled.
@@ -741,11 +761,18 @@ buffer still unfolds through the old name."
     (insert "* one\ntext under one\n* two\ntext under two\n")
     (org-overview)
     (goto-char (point-min))
-    ;; Folded: the body after the first heading is hidden by outline.
-    (should (eq 'outline (get-char-property (line-end-position) 'invisible)))
+    ;; That something is hidden is the assertion, not what it is called.  Org
+    ;; has two folding implementations and they use different property values:
+    ;; measured on the same buffer, `outline' under `org-fold-core-style' set
+    ;; to `overlays' and `org-fold-outline' under `text-properties'.  An
+    ;; earlier version of this test required `outline' and so failed on the
+    ;; versions defaulting to the other style.
+    (should (get-char-property (line-end-position) 'invisible))
     (docx-view--show-all)
     (goto-char (point-min))
-    (should-not (get-char-property (line-end-position) 'invisible))))
+    (should-not (get-char-property (line-end-position) 'invisible))
+    ;; Nothing anywhere is left hidden.
+    (should-not (text-property-not-all (point-min) (point-max) 'invisible nil))))
 
 (ert-deftest docx-view-test-callable-rejects-a-dangling-alias ()
   "`docx-view--callable' answers for what can really be called.
