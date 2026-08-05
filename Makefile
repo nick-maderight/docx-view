@@ -13,6 +13,21 @@
 EMACS ?= emacs
 BATCH  = $(EMACS) -Q --batch -L .
 
+# Every --eval form below is written on one line, deliberately.
+#
+# A backslash continuation inside the single-quoted argument does not work: the
+# shell cannot consume a backslash-newline inside single quotes, so the
+# backslash reaches Emacs, whose reader takes `\' followed by a newline as an
+# escaped character and yields a symbol whose name is a newline.  Evaluating
+# that symbol signals `void-variable \' and Emacs exits 255.
+#
+# It appeared to work here only by accident of make's version.  GNU make 3.81,
+# which macOS still ships, collapses the continuation before the shell sees it;
+# GNU make 4.x, which every Linux distribution ships, passes it through
+# unchanged.  Measured: identical Makefile, `make compile' exits 0 under 3.81
+# and 255 under 4.4.1, and CI failed on all six Emacs versions for this reason
+# while passing locally.  One line each keeps both versions honest.
+
 # docx-view.el must come last: it requires the other three, and byte-compiling
 # it first would compile them as a side effect, without the warning settings.
 SRC  = docx-view-pandoc.el docx-view-ooxml.el docx-view-render.el docx-view.el
@@ -35,11 +50,7 @@ test:
 # it with `let' on the command line fails: at that point it is still an
 # ordinary lexical variable, and defining it as dynamic afterwards is an error.
 compile:
-	$(BATCH) --eval '(progn \
-	  (require (quote bytecomp)) \
-	  (setq byte-compile-error-on-warn t) \
-	  (dolist (f command-line-args-left) \
-	    (unless (byte-compile-file f) (kill-emacs 1))))' $(SRC) $(TEST)
+	$(BATCH) --eval '(progn (require (quote bytecomp)) (setq byte-compile-error-on-warn t) (dolist (f command-line-args-left) (unless (byte-compile-file f) (kill-emacs 1))))' $(SRC) $(TEST)
 
 lint: lint-package lint-checkdoc
 
@@ -48,16 +59,7 @@ lint: lint-package lint-checkdoc
 # .dir-locals.el names docx-view.el as the main file; package-lint reads it
 # because it calls `emacs-lisp-mode' on a buffer that already has a file name.
 lint-package:
-	$(BATCH) --eval '(progn \
-	  (setq package-user-dir "/tmp/docx-view-lint-elpa") \
-	  (require (quote package)) \
-	  (add-to-list (quote package-archives) (quote ("melpa" . "https://melpa.org/packages/")) t) \
-	  (package-initialize) \
-	  (unless (package-installed-p (quote package-lint)) \
-	    (package-refresh-contents) \
-	    (package-install (quote package-lint))) \
-	  (require (quote package-lint)))' \
-	  -f package-lint-batch-and-exit $(SRC)
+	$(BATCH) --eval '(progn (setq package-user-dir "/tmp/docx-view-lint-elpa") (require (quote package)) (add-to-list (quote package-archives) (quote ("melpa" . "https://melpa.org/packages/")) t) (package-initialize) (unless (package-installed-p (quote package-lint)) (package-refresh-contents) (package-install (quote package-lint))) (require (quote package-lint)))' -f package-lint-batch-and-exit $(SRC)
 
 # checkdoc always exits 0 and writes its findings to a buffer, so a naive batch
 # run is silent whether the file is clean or not.  The exit status has to be
@@ -72,14 +74,7 @@ lint-package:
 # worse.  The check itself stays on, so a genuine "Returns the..." opening is
 # still caught.
 lint-checkdoc:
-	$(BATCH) --eval '(progn \
-	  (require (quote checkdoc)) \
-	  (dolist (w (quote ("changes" "holds" "looks"))) \
-	    (setq checkdoc-common-verbs-wrong-voice \
-	          (assoc-delete-all w checkdoc-common-verbs-wrong-voice))) \
-	  (dolist (f command-line-args-left) (checkdoc-file f)) \
-	  (let ((buf (get-buffer "*Warnings*"))) \
-	    (when (and buf (> (buffer-size buf) 0)) (kill-emacs 1))))' $(SRC) $(TEST)
+	$(BATCH) --eval '(progn (require (quote checkdoc)) (dolist (w (quote ("changes" "holds" "looks"))) (setq checkdoc-common-verbs-wrong-voice (assoc-delete-all w checkdoc-common-verbs-wrong-voice))) (dolist (f command-line-args-left) (checkdoc-file f)) (let ((buf (get-buffer "*Warnings*"))) (when (and buf (> (buffer-size buf) 0)) (kill-emacs 1))))' $(SRC) $(TEST)
 
 clean:
 	rm -f $(ELC)
