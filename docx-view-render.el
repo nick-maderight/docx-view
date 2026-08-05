@@ -66,6 +66,12 @@
 (require 'org)
 (require 'cl-lib)
 (require 'subr-x)
+;; iso8601 is required explicitly, and not left to arrive as a dependency of
+;; something else.  On Emacs 28.1 and later parse-time.el requires it, so it is
+;; loaded either way; on 27.1 and 27.2 it is not, and `iso8601-parse' would be
+;; void.  See `docx-view-render-format-date' for why it is called directly.
+(require 'iso8601)
+(require 'time-date)
 (require 'docx-view-pandoc)
 (require 'docx-view-ooxml)
 
@@ -650,10 +656,23 @@ defaults to 2, leaving level 1 for the document's own title."
 
 (defun docx-view-render-format-date (date)
   "Return the ISO 8601 DATE formatted for display, or DATE when unparsable.
-Parsing is delegated to `parse-time-string' rather than done by hand."
+
+Parsing goes through `iso8601-parse' and not through `parse-time-string'.
+Word writes these timestamps as ISO 8601 -- \"2026-08-01T10:00:00Z\" -- and
+`parse-time-string' only learned that format in Emacs 28.1, one version above
+this package's floor.  Verified by diffing `lisp/calendar/parse-time.el'
+between the two releases: 28.1 wraps the whole body in a `condition-case' that
+tries `iso8601-parse' first, and 27.1 has only the RFC 822 tokenizer, which
+returns every field nil for an ISO string.  Measured on 27.1 and 27.2 in CI:
+the date was printed back out verbatim, unformatted, for every comment and
+every change in every document.
+
+`iso8601-parse' itself is present and unchanged in 27.1, so asking it directly
+behaves the same on every supported version.  It signals rather than returning
+nil on a string it cannot read, which is what `ignore-errors' is for."
   (or (ignore-errors
-        (let ((parsed (parse-time-string date)))
-          (when (and (nth 4 parsed) (nth 5 parsed))
+        (let ((parsed (iso8601-parse date)))
+          (when (and (decoded-time-month parsed) (decoded-time-year parsed))
             (format-time-string "%Y-%m-%d %H:%M"
                                 (encode-time (decoded-time-set-defaults parsed))))))
       date))

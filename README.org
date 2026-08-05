@@ -131,11 +131,11 @@ make check     # all three, which is what CI runs
 
 Plain make, on purpose: eldev and cask are both good, but each is one more thing to install before a contributor can run the tests, and this package's whole claim is that it needs nothing but Emacs and pandoc.
 
-The 65 tests cover each layer and the mode. The fixtures under =test/fixtures= are hand-built OOXML rather than documents saved by Word, so each one exercises a named feature of the format and the suite has no dependency on a Word installation. =test/fixtures/generate-fixtures.py= rebuilds them.
+The 67 tests cover each layer and the mode. The fixtures under =test/fixtures= are hand-built OOXML rather than documents saved by Word, so each one exercises a named feature of the format and the suite has no dependency on a Word installation. =test/fixtures/generate-fixtures.py= rebuilds them.
 
 Tests that need pandoc skip rather than fail when it is absent, so the suite still says something useful on a machine without it.
 
-CI runs the suite on Emacs 27.1, 27.2, 28.2, 29.4, 30.2 and snapshot on Linux, and on 27.1 and 30.2 on macOS.
+CI runs the suite on Emacs 27.1, 27.2, 28.2, 29.4, 30.2 and snapshot on Linux, and on 28.1 and 30.2 on macOS. The macOS floor is 28.1 rather than 27.1 because =macos-latest= is Apple Silicon and nix-emacs-ci, which =purcell/setup-emacs= builds from, does not build anything below 28.1 for =aarch64-darwin=. The 27.1 floor is still tested, on Linux.
 
 * License
 

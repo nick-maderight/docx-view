@@ -707,9 +707,15 @@ machine and failed on CI, which runs at UTC.  Measured, same input:
 
 `format-time-string' is given the same instant and left to apply the same
 zone, so the assertion holds in any zone while still failing if the parsing,
-the field selection or the format string regresses."
-  (let* ((instant (encode-time (decoded-time-set-defaults
-                                (parse-time-string "2026-08-01T10:00:00Z"))))
+the field selection or the format string regresses.
+
+The instant is written out field by field rather than parsed.  Deriving it with
+`parse-time-string' made this test agree with the code for the wrong reason:
+that function does not read ISO 8601 before Emacs 28.1, so on 27.1 and 27.2
+both sides of the comparison were nonsense -- expected \"0000-01-01 00:00\",
+got the raw timestamp back.  Building the instant here means the test states
+what 2026-08-01T10:00:00Z is, instead of asking the code under test."
+  (let* ((instant (encode-time (list 0 0 10 1 8 2026 nil nil 0)))
          (expected (format-time-string "%Y-%m-%d %H:%M" instant))
          (formatted (docx-view-render-format-date "2026-08-01T10:00:00Z")))
     (should (equal expected formatted))
@@ -727,6 +733,31 @@ the field selection or the format string regresses."
   (should (equal "not a date" (docx-view-render-format-date "not a date")))
   ;; A date with no time at all still formats, since the defaults fill it in.
   (should (docx-view-render-format-date "2026-08-01T00:00:00Z")))
+
+(ert-deftest docx-view-test-render-date-does-not-use-parse-time-string ()
+  "The date parser reads ISO 8601 on every supported Emacs, not just recent ones.
+
+Word writes its timestamps as ISO 8601, and `parse-time-string' only learned
+that format in Emacs 28.1: 28.1 tries `iso8601-parse' first, 27.1 has only the
+RFC 822 tokenizer and returns every field nil.  So on 27.1 and 27.2 the date
+was printed back out raw, for every comment and every change in every document.
+
+The regression is pinned by making a modern Emacs behave like 27.1 for the
+duration of the test: `parse-time-string' is replaced with a function that
+returns what 27.1 returns for an ISO string, and the date must still format.
+This test fails against the previous implementation and passes against this
+one, which is the only reason to keep it."
+  (cl-letf (((symbol-function 'parse-time-string)
+             (lambda (_string) (list nil nil nil nil nil nil nil -1 nil))))
+    (let ((formatted (docx-view-render-format-date "2026-08-01T10:00:00Z")))
+      (should-not (equal formatted "2026-08-01T10:00:00Z"))
+      (should (string-match-p "\\`2026-0[78]-[0-3][0-9] [0-2][0-9]:[0-5][0-9]\\'"
+                              formatted))))
+  ;; The fallback still has to work when the string really is not a date, and it
+  ;; must not depend on `parse-time-string' for that either.
+  (cl-letf (((symbol-function 'parse-time-string)
+             (lambda (_string) (error "parse-time-string must not be called"))))
+    (should (equal "not a date" (docx-view-render-format-date "not a date")))))
 
 ;;;; Locating changes
 
