@@ -17,11 +17,20 @@ jobs:
         os: [ubuntu-latest]
         emacs-version: ['27.1', '27.2', '28.2', '29.4', '30.2', 'snapshot']
         include:
-          # One macOS job, on the lowest supported version and the newest
-          # release, because the two external programs this package calls are
-          # the parts most likely to differ between platforms.
+          # Two macOS jobs, on the oldest version available there and on the
+          # newest release, because the two external programs this package
+          # calls are the parts most likely to differ between platforms.
+          #
+          # 28.1 rather than 27.1, which is this package's actual floor.
+          # macos-latest is Apple Silicon now, and nix-emacs-ci does not build
+          # anything below 28.1 for aarch64-darwin: its flake puts every older
+          # version behind `lib.optionalAttrs (system != "aarch64-darwin")',
+          # commented "Some versions do not currently build on MacOS".  Asking
+          # for 27.1 there fails with "does not provide attribute
+          # packages.aarch64-darwin.emacs-27-1" before Emacs is ever run.  The
+          # 27.1 floor is still tested, on Linux, where it is available.
           - os: macos-latest
-            emacs-version: '27.1'
+            emacs-version: '28.1'
           - os: macos-latest
             emacs-version: '30.2'
     steps:

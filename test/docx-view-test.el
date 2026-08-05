@@ -675,10 +675,38 @@ rendering its first child instead of the whole payload loses the body."
                        (docx-view-document-warnings doc))))))
 
 (ert-deftest docx-view-test-render-date-formatting ()
-  "Dates are formatted for reading, and an unparsable one is passed through."
-  (should (equal "2026-08-01 03:00"
-                 (docx-view-render-format-date "2026-08-01T10:00:00Z")))
-  (should (equal "not a date" (docx-view-render-format-date "not a date"))))
+  "A UTC date is shown in local time, and an unparsable one is passed through.
+
+Displaying local time is the point: a reviewer wants to know when a comment
+was written in their own frame of reference, not in whichever zone the author
+happened to be in.  So the expected string has to be computed rather than
+written down.  Writing it down is what broke this test: \"2026-08-01 03:00\"
+is right at UTC-7 and wrong everywhere else, so it passed on its author's
+machine and failed on CI, which runs at UTC.  Measured, same input:
+03:00 at America/Los_Angeles, 10:00 at UTC, 19:00 at Asia/Tokyo.
+
+`format-time-string' is given the same instant and left to apply the same
+zone, so the assertion holds in any zone while still failing if the parsing,
+the field selection or the format string regresses."
+  (let* ((instant (encode-time (decoded-time-set-defaults
+                                (parse-time-string "2026-08-01T10:00:00Z"))))
+         (expected (format-time-string "%Y-%m-%d %H:%M" instant))
+         (formatted (docx-view-render-format-date "2026-08-01T10:00:00Z")))
+    (should (equal expected formatted))
+    ;; The shape must hold in any zone.  Minutes are not asserted to be "00":
+    ;; not every offset is a whole number of hours.  Measured on the same
+    ;; instant: 15:30 at Asia/Kolkata, 15:45 at Asia/Kathmandu, 18:45 at
+    ;; Australia/Eucla.  An earlier version of this test required ":00" and so
+    ;; failed for roughly a fifth of the world.
+    (should (string-match-p "\\`[0-9]\\{4\\}-[01][0-9]-[0-3][0-9] [0-2][0-9]:[0-5][0-9]\\'"
+                            formatted))
+    ;; The instant itself is what must not drift: parsing and re-formatting
+    ;; must land back on 10:00 UTC whatever the local zone does to the display.
+    (should (equal "2026-08-01 10:00"
+                   (format-time-string "%Y-%m-%d %H:%M" instant t))))
+  (should (equal "not a date" (docx-view-render-format-date "not a date")))
+  ;; A date with no time at all still formats, since the defaults fill it in.
+  (should (docx-view-render-format-date "2026-08-01T00:00:00Z")))
 
 ;;;; Locating changes
 
