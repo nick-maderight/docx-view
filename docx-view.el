@@ -192,6 +192,44 @@ separate link type per case."
 
 ;;;; Rendering into the buffer
 
+(defun docx-view--show-all ()
+  "Unfold everything in the current buffer.
+
+Org renamed this in version 9.6: `org-show-all' became
+`org-fold-show-all', with the old name left behind as an obsolete alias.
+Neither name can be written down on its own here.  Emacs 27 and 28, both
+inside this package's supported range, bundle an org older than 9.6 and have
+only the old name, so naming the new one fails to compile there -- measured:
+\"the function `org-fold-show-all' is not known to be defined\", an error and
+not a warning under `byte-compile-error-on-warn'.  Naming the old one instead
+would draw an obsolescence warning on every modern Emacs, which the same
+setting turns into an error too.
+
+So the choice is made at run time, through `funcall' on a symbol the compiler
+does not see as a call.  The symbol is built with `intern-soft' rather than
+quoted, because a quoted name in either position is enough for the compiler to
+resolve it and complain."
+  (funcall (or (docx-view--callable "org-fold-show-all")
+               (docx-view--callable "org-show-all")
+               ;; Neither name exists only if org has changed again.  Outline's
+               ;; own command is the honest fallback: org folding is built on
+               ;; outline, and unfolding everything is what it does.
+               #'outline-show-all)))
+
+(defun docx-view--callable (name)
+  "Return the symbol named NAME when it names a function that can be called.
+
+NAME is a string, so that the byte-compiler does not read this as a reference
+to the function and warn that it may be undefined.
+
+`fboundp' alone is not enough.  On a modern Emacs `org-show-all' is an
+obsolete alias for `org-fold-show-all', and an alias whose target has gone
+still answers `fboundp' while failing with `void-function' when called.
+`indirect-function' is what distinguishes the two: it follows the alias chain
+and returns nil when the chain ends nowhere."
+  (let ((symbol (intern-soft name)))
+    (and symbol (fboundp symbol) (indirect-function symbol) symbol)))
+
 (defun docx-view--check-requirements ()
   "Signal a `user-error' when a required external program is missing."
   (unless (docx-view-pandoc-available-p)
@@ -322,7 +360,7 @@ sits at the range's start."
     (docx-view--apply-overlays (docx-view-document-changes doc))
     (goto-char (point-min))
     (set-buffer-modified-p nil)
-    (if docx-view-startup-folded (org-overview) (org-fold-show-all))
+    (if docx-view-startup-folded (org-overview) (docx-view--show-all))
     (when (and docx-view-show-warnings (docx-view-document-warnings doc))
       (message "docx-view: %s"
                (string-join (docx-view-document-warnings doc); one line each

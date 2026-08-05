@@ -726,6 +726,44 @@ the field selection or the format string regresses."
             (should (<= (docx-view-change-beg change)
                         (docx-view-change-end change)))))))))
 
+;;;; Org compatibility
+
+(ert-deftest docx-view-test-show-all-works-across-org-versions ()
+  "Unfolding works whichever of org's two names for it exists.
+
+Org 9.6 renamed `org-show-all' to `org-fold-show-all'.  Emacs 27 and 28 are
+inside this package's supported range and bundle org 9.5, which has only the
+old name, so naming the new one directly does not compile there.  Verified
+against org 9.5.5 from org's own git: `org-fold-show-all' is absent, and the
+buffer still unfolds through the old name."
+  (with-temp-buffer
+    (let ((org-inhibit-startup t)) (org-mode))
+    (insert "* one\ntext under one\n* two\ntext under two\n")
+    (org-overview)
+    (goto-char (point-min))
+    ;; Folded: the body after the first heading is hidden by outline.
+    (should (eq 'outline (get-char-property (line-end-position) 'invisible)))
+    (docx-view--show-all)
+    (goto-char (point-min))
+    (should-not (get-char-property (line-end-position) 'invisible))))
+
+(ert-deftest docx-view-test-callable-rejects-a-dangling-alias ()
+  "`docx-view--callable' answers for what can really be called.
+
+An obsolete alias whose target has been removed still satisfies `fboundp'
+while signalling `void-function' when called, so `fboundp' alone would pick a
+name that does not work.  This matters because org keeps `org-show-all' as an
+alias for `org-fold-show-all' on every modern Emacs."
+  (should (eq 'ignore (docx-view--callable "ignore")))
+  (should-not (docx-view--callable "docx-view-test-no-such-function"))
+  ;; A symbol that exists as a variable but not as a function.
+  (should-not (docx-view--callable "docx-view-startup-folded"))
+  ;; An alias pointing at nothing: fboundp says yes, calling it fails.
+  (let ((alias (make-symbol "docx-view-test-dangling")))
+    (fset alias (make-symbol "docx-view-test-absent-target"))
+    (should (fboundp alias))
+    (should-error (funcall alias) :type 'void-function)))
+
 ;;;; The major mode
 
 (ert-deftest docx-view-test-mode-renders-on-open ()
