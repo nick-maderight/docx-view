@@ -76,7 +76,7 @@ body1 = ''.join([
   # insertion + deletion in one para
   p(r("The quick ") + ins(101,A,D1,r("very ")) + dele(102,B,D2,dr("brown ")) + r("fox jumps over the lazy dog.")),
   # substitution: adjacent del+ins (the common Word "replace" idiom)
-  p(r("We should ") + dele(103,A,D1,dr("utilise")) + ins(104,A,D1,r("use")) + r(" plain words.")),
+  p(r("We should ") + dele(103,A,D1,dr("utilize")) + ins(104,A,D1,r("use")) + r(" plain words.")),
   # move
   p(f'<w:moveFromRangeStart w:id="110" w:name="move1" w:author="{A}" w:date="{D3}"/>'
     + f'<w:moveFrom w:id="111" w:author="{A}" w:date="{D3}">{dr("This sentence was moved elsewhere.")}</w:moveFrom>'

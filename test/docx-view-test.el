@@ -226,7 +226,7 @@ a wrong-type-argument before the guard was added."
       (should (member "Table" tags)))))
 
 (ert-deftest docx-view-test-pandoc-span-kinds ()
-  "Revision spans are recognised by their pandoc class."
+  "Revision spans are recognized by their pandoc class."
   (docx-view-test-with-pandoc
     (let ((kinds nil))
       (letrec ((walk (lambda (n)
@@ -257,7 +257,7 @@ text.  This asserts the content index that prevents it."
                  " ")))
       (should-not (string-match-p "Alice Smith" text))
       (should-not (string-match-p "2026-08-01T" text))
-      (should (string-match-p "utilise" text)))))
+      (should (string-match-p "utilize" text)))))
 
 (ert-deftest docx-view-test-pandoc-stringify-omits-comment-bodies ()
   "A comment's text does not leak into the document's prose.
@@ -1131,7 +1131,7 @@ is invisible: it is every query for our links that comes back empty."
           (pcase (docx-view-change-kind change)
             ('insertion (should (member 'docx-view-insertion (flatten-tree face))))
             ('deletion (should (member 'docx-view-deletion (flatten-tree face)))))))
-      ;; Authors get distinct colours.
+      ;; Authors get distinct colors.
       (let ((authors (docx-view-document-authors docx-view--document)))
         (should (= (length authors)
                    (length (delete-dups

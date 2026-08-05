@@ -105,8 +105,8 @@
 
 (defcustom docx-view-render-author-colors
   '("#1f6feb" "#a371f7" "#d29922" "#2da44e" "#cf222e" "#0f766e" "#9a6700")
-  "Colours cycled through to distinguish one reviewer from another.
-The order is stable for a given document, so a reviewer keeps their colour
+  "Colors cycled through to distinguish one reviewer from another.
+The order is stable for a given document, so a reviewer keeps their color
 across a revert."
   :type '(repeat color)
   :group 'docx-view)
@@ -273,10 +273,10 @@ backslashes included."
           (setq out (concat out (docx-view-render--link-1 key tail)))))
       out)))
 
-;;;; Author colours
+;;;; Author colors
 
 (defun docx-view-render-author-color (author authors)
-  "Return the colour assigned to AUTHOR given the AUTHORS list, or nil."
+  "Return the color assigned to AUTHOR given the AUTHORS list, or nil."
   (when (and author authors docx-view-render-author-colors)
     (let ((i (cl-position author authors :test #'equal)))
       (when i
@@ -395,18 +395,18 @@ one paragraph and close in another."
           ((member tag '("Space" "SoftBreak")) " ")
           ((equal tag "LineBreak") "\n")
           ((equal tag "Strong")
-           (docx-view-render--emphasise (docx-view-render-inlines kids state) "*"))
+           (docx-view-render--emphasize (docx-view-render-inlines kids state) "*"))
           ((equal tag "Emph")
-           (docx-view-render--emphasise (docx-view-render-inlines kids state) "/"))
+           (docx-view-render--emphasize (docx-view-render-inlines kids state) "/"))
           ((equal tag "Underline")
-           (docx-view-render--emphasise (docx-view-render-inlines kids state) "_"))
+           (docx-view-render--emphasize (docx-view-render-inlines kids state) "_"))
           ((member tag '("Strikeout" "Subscript" "Superscript" "SmallCaps"))
            ;; Rendered plainly: org's markup for these either collides with
            ;; the deletion styling or does not exist.
            (docx-view-render-inlines kids state))
           ((equal tag "Code")
            (let ((text (if (stringp payload) payload (or (cadr kids) ""))))
-             (docx-view-render--emphasise text "~")))
+             (docx-view-render--emphasize text "~")))
           ((equal tag "Math")
            (or (car (last (and (proper-list-p payload) payload))) ""))
           ((equal tag "Quoted")
@@ -442,8 +442,8 @@ one paragraph and close in another."
           (t (docx-view-render-inlines kids state)))))))
    nodes ""))
 
-(defun docx-view-render--emphasise (text marker)
-  "Return TEXT wrapped in org emphasis MARKER, when org would honour it.
+(defun docx-view-render--emphasize (text marker)
+  "Return TEXT wrapped in org emphasis MARKER, when org would honor it.
 Org's emphasis syntax requires particular characters either side of the
 markers, and refuses to apply mid-word or next to a CJK character.  When it
 would not apply, TEXT is returned plain rather than with literal markers
