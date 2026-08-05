@@ -37,7 +37,7 @@ docx-view requires Emacs 27.1 or newer, [[https://pandoc.org][pandoc]], and =unz
   :vc (:url "https://github.com/nick-maderight/docx-view" :rev :newest))
 #+end_src
 
-Keep the =:rev :newest=. The default, =:last-release=, means the newest revision that changed the =Version:= header. This repository has no release tag yet, so that default installs the first commit rather than current code.
+Keep the =:rev :newest=. The default, =:last-release=, means the newest commit that changed the =Version:= header. Nothing has bumped that header since the first commit, so the default installs the first commit rather than current code.
 
 ** use-package with elpaca
 
